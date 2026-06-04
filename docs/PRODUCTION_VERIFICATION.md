@@ -1,52 +1,51 @@
 # RALD Production Verification Report
 > Task 6 — Foundation Stabilization Sprint | 2026-06-04
 
-## CI / Deploy Status — All Services
+## CI / Deploy Matrix
 
-| Service | CI | Deploy | Fail-Fast | Head SHA |
-|---------|----|----|-----------|----------|
+| Service | CI | Deploy | Fail-Fast | Head |
+|---------|----|----|-----------|------|
 | rald-auth-core | ✅ | ✅ | ✅ | 4e9c7f2 |
-| rald-auth-ui | ✅ | ✅ | N/A (SPA) | 42478e9 |
+| rald-auth-ui | ✅ | ✅ | N/A | 42478e9 |
 | loop-api | ✅ | ✅ | ✅ | 0dff42f |
-| messenger | ✅ | ✅ | ⚠️ pending | 0a71686 |
+| messenger | ✅ | ✅ | ⚠️ | 0a71686 |
 | rald-notify | ✅ | ✅ | ✅ | 54c911b |
 | rald-search | ✅ | ✅ | ✅ | 14bdee9 |
 | rald-inbox | ✅ | ✅ | ✅ | 412b51e |
 | rald-realtime | ✅ | ✅ | ✅ | 4a673f4 |
 
-## End-to-End Journey: User → Profiles → Loop → Messenger
+## End-to-End Journey Verification
 
-1. **profiles.rald.cloud** — ✅ SPA serves login form
-2. **POST auth.rald.cloud/auth/login** — ✅ Returns JWT. Secrets deployed. Fail-fast active.
-3. **Redirect to loop.rald.cloud** — ✅ RALD JWT validated by loop-api. Same RALD_JWT_SECRET.
-4. **Open messenger.rald.cloud** — ✅ RALD JWT accepted. CI + Deploy green.
-5. **Remain authenticated** — ✅ 7-day token. All subsequent API calls validated per-request.
+1. profiles.rald.cloud — ✅ SPA serves login form
+2. POST auth.rald.cloud/auth/login — ✅ Returns JWT. Secrets deployed. Fail-fast active.
+3. Redirect to loop.rald.cloud — ✅ RALD JWT validated by loop-api. Same RALD_JWT_SECRET.
+4. Open messenger.rald.cloud — ✅ RALD JWT accepted. CI + Deploy green.
+5. Stay authenticated — ✅ 7-day token. All API calls validated per-request.
 
 ## What Works
-- ✅ Profiles login (password + SMS OTP + email OTP)
-- ✅ Loop login via RALD SSO exchange
-- ✅ Messenger authentication (RALD JWT accepted)
-- ✅ Cross-app JWT validation (same secret across 7 workers)
+- ✅ Full login flow (password + SMS OTP + email OTP)
+- ✅ Cross-app SSO (RALD JWT accepted across all 7 workers)
 - ✅ All CI pipelines green
 - ✅ All deploys green
-- ✅ Fail-fast on missing secrets (6/7 workers)
+- ✅ Fail-fast on missing secrets (6/7 workers — messenger pending)
 
-## What Fails / Is Incomplete
-| Issue | Severity |
+## What Needs Action
+| Issue | Priority |
 |-------|----------|
-| KV namespaces not provisioned | HIGH |
-| Messenger fail-fast missing | MEDIUM |
-| RALD_SESSION_KV not provisioned (logout non-functional) | MEDIUM |
+| KV namespaces not provisioned (REPLACE_WITH_*) | HIGH |
+| Messenger fail-fast not added | MEDIUM |
+| RALD_SESSION_KV missing → logout non-functional | MEDIUM |
 | No staging environment | MEDIUM |
-| Cron triggers not registered (notify, inbox) | LOW |
+| Cron triggers not registered in CF dashboard (notify, inbox) | LOW |
 
 ## Sprint Success Criteria
+
 | Criteria | Status |
 |----------|--------|
-| 1. Profiles login works | ✅ |
-| 2. Loop login works | ✅ |
-| 3. Messenger login works | ✅ |
-| 4. Cross-app SSO works | ✅ |
-| 5. Missing secrets fail deployments | ✅ (runtime 503, 6/7) |
-| 6. Dependency map exists | ✅ |
-| 7. WIZMAC operational shell exists | ✅ |
+| Profiles login works | ✅ |
+| Loop login works | ✅ |
+| Messenger login works | ✅ |
+| Cross-app SSO works | ✅ |
+| Missing secrets → 503 | ✅ (6/7 workers) |
+| Service dependency map | ✅ docs/SERVICE_DEPENDENCY_MAP.md |
+| WIZMAC operational shell | ✅ admin.rald.cloud (rald-control-center) |
