@@ -1,0 +1,120 @@
+name: Provision KV Namespaces
+
+on:
+  workflow_dispatch:
+
+jobs:
+  provision:
+    name: Provision all 8 KV namespaces and patch wrangler.toml files
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - name: Provision and patch
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GH_PAT: ${{ secrets.GITHUB_PAT }}
+        run: |
+          node << 'JSEOF'
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token     = process.env.CLOUDFLARE_API_TOKEN;
+          const ghPat     = process.env.GH_PAT;
+          const org       = 'Ostinato-Loop';
+          const cfH = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+          const ghH = { 'Authorization': `Bearer ${ghPat}`, 'Content-Type': 'application/json',
+                        'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
+          const base = `https://api.cloudflare.com/client/v4/accounts/${accountId}/storage/kv/namespaces`;
+
+          async function listAll() {
+            const r = await fetch(`${base}?per_page=100`, { headers: cfH });
+            const d = await r.json();
+            if (!d.success) throw new Error('List KV failed: ' + JSON.stringify(d.errors));
+            return d.result;
+          }
+          async function resolveId(title) {
+            const all = await listAll();
+            const hit = all.find(n => n.title === title);
+            if (hit) { console.log(`  [existing] ${title} → ${hit.id}`); return hit.id; }
+            const r = await fetch(base, { method: 'POST', headers: cfH, body: JSON.stringify({ title }) });
+            const d = await r.json();
+            if (!d.success) {
+              const retry = (await listAll()).find(n => n.title === title);
+              if (retry) { console.log(`  [race-ok]  ${title} → ${retry.id}`); return retry.id; }
+              throw new Error('Create KV failed: ' + JSON.stringify(d.errors));
+            }
+            console.log(`  [created]  ${title} → ${d.result.id}`);
+            return d.result.id;
+          }
+          async function ghGet(repo, path) {
+            const r = await fetch(`https://api.github.com/repos/${org}/${repo}/contents/${path}`, { headers: ghH });
+            const d = await r.json();
+            if (!r.ok) throw new Error(`GH read ${repo}/${path}: ${d.message}`);
+            return { content: Buffer.from(d.content, 'base64').toString('utf8'), sha: d.sha };
+          }
+          async function ghPut(repo, path, content, sha, msg) {
+            const r = await fetch(`https://api.github.com/repos/${org}/${repo}/contents/${path}`, {
+              method: 'PUT', headers: ghH,
+              body: JSON.stringify({ message: msg, content: Buffer.from(content).toString('base64'), sha })
+            });
+            const d = await r.json();
+            if (!r.ok) throw new Error(`GH write ${repo}/${path}: ${d.message}`);
+            console.log(`  ✓ patched ${repo}/${path}`);
+          }
+
+          (async () => {
+            console.log('=== Provisioning 8 KV Namespaces via Cloudflare API ===');
+            const ids = {
+              authRate:       await resolveId('rald-auth-rate-limit'),
+              authSession:    await resolveId('rald-session'),
+              notifyRate:     await resolveId('rald-notify-rate-limit'),
+              searchRate:     await resolveId('rald-search-rate-limit'),
+              inboxRate:      await resolveId('rald-inbox-rate-limit'),
+              realtimeRate:   await resolveId('rald-realtime-rate-limit'),
+              realtimeHealth: await resolveId('rald-realtime-health'),
+              realtimeState:  await resolveId('rald-realtime-state'),
+            };
+
+            console.log('\n=== Patching wrangler.toml files via GitHub API ===');
+
+            { // rald-auth-core — 2 replacements
+              const { content, sha } = await ghGet('rald-auth-core', 'wrangler.toml');
+              const p = content
+                .replace('REPLACE_WITH_RATE_LIMIT_KV_NAMESPACE_ID', ids.authRate)
+                .replace('REPLACE_WITH_RALD_SESSION_KV_NAMESPACE_ID', ids.authSession);
+              await ghPut('rald-auth-core', 'wrangler.toml', p, sha, 'chore(kv): set real namespace IDs — RATE_LIMIT_KV, RALD_SESSION_KV');
+            }
+            { // rald-notify — 1 replacement
+              const { content, sha } = await ghGet('rald-notify', 'wrangler.toml');
+              await ghPut('rald-notify', 'wrangler.toml',
+                content.replace('REPLACE_WITH_RATE_LIMIT_KV_ID', ids.notifyRate),
+                sha, 'chore(kv): set real namespace ID — RATE_LIMIT_KV');
+            }
+            { // rald-search — 1 replacement
+              const { content, sha } = await ghGet('rald-search', 'wrangler.toml');
+              await ghPut('rald-search', 'wrangler.toml',
+                content.replace('REPLACE_WITH_RATE_LIMIT_KV_ID', ids.searchRate),
+                sha, 'chore(kv): set real namespace ID — RATE_LIMIT_KV');
+            }
+            { // rald-inbox — 1 replacement
+              const { content, sha } = await ghGet('rald-inbox', 'wrangler.toml');
+              await ghPut('rald-inbox', 'wrangler.toml',
+                content.replace('REPLACE_WITH_RATE_LIMIT_KV_ID', ids.inboxRate),
+                sha, 'chore(kv): set real namespace ID — RATE_LIMIT_KV');
+            }
+            { // rald-realtime — 3 replacements
+              const { content, sha } = await ghGet('rald-realtime', 'wrangler.toml');
+              const p = content
+                .replace('REPLACE_WITH_RATE_LIMIT_KV_ID',    ids.realtimeRate)
+                .replace('REPLACE_WITH_HEALTH_KV_ID',         ids.realtimeHealth)
+                .replace('REPLACE_WITH_PROVIDER_STATE_KV_ID', ids.realtimeState);
+              await ghPut('rald-realtime', 'wrangler.toml', p, sha,
+                'chore(kv): set real namespace IDs — RATE_LIMIT_KV, HEALTH_KV, PROVIDER_STATE_KV');
+            }
+
+            console.log('\n=== Final IDs ===');
+            console.log(JSON.stringify(ids, null, 2));
+            console.log('\nAll 8 KV namespaces provisioned. All 5 wrangler.toml files patched and committed.');
+          })().catch(e => { console.error('FATAL:', e.message); process.exit(1); });
+          JSEOF
